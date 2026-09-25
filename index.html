@@ -69,6 +69,7 @@
   .palette .sw-btn { display: flex; align-items: center; gap: 6px; padding: 4px 10px 4px 4px; border-radius: 20px; border: 2px solid transparent; background: #f4f1ec; cursor: pointer; font-size: 13px; }
   .palette .sw-btn.sel { border-color: var(--ink); }
   .palette .sw-btn i { width: 20px; height: 20px; border-radius: 50%; border: 1px solid rgba(0,0,0,.2); display: inline-block; }
+  .palette .sw-btn i.cat-i { border: none; font-style: normal; font-size: 16px; line-height: 20px; text-align: center; }
   .sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 1px solid rgba(0,0,0,.3); margin-right: 3px; vertical-align: -1px; }
 
   #warn { color: #b3261e; font-size: 14px; margin: 8px 0; }
@@ -144,7 +145,7 @@
           <button id="btnAutoN">自動偵測格數</button>
         </div>
         <div class="palette" id="palette"></div>
-        <div class="muted" style="margin-bottom:8px">先點上面的顏色，再點（或拖過）盤面格子即可改色。</div>
+        <div class="muted" style="margin-bottom:8px">先點上面的顏色，再點（或拖過）盤面格子即可改色。<br>如果遊戲一開始就給了貓的位置，選「🐱 提示貓」再點那一格（再點一次取消）。</div>
         <div id="editBoard"></div>
         <div id="warn"></div>
         <div class="tools"><button class="primary" id="btnSolve">開始解題 🐾</button></div>
@@ -186,6 +187,7 @@
   'use strict';
   const $ = (id) => document.getElementById(id);
   const S = window.MeowSolver, D = window.MeowDetect;
+  const CAT_TOOL = -1; // 調色盤上的「提示貓」工具
 
   const app = {
     img: null,        // ImageData
@@ -194,8 +196,9 @@
     N: 0,
     colors: null,
     palette: [],      // [{css, name}]
-    sel: 0,
+    sel: 0,               // 目前選的顏色，或 CAT_TOOL
     uncertain: new Set(), // 辨識不確定的格子
+    givens: new Set(),    // 題目一開始給的貓
     result: null,
     idx: 0,
   };
@@ -245,6 +248,7 @@
     app.palette = res.palette.map((p) => ({ css: p.css, name: p.name }));
     app.lowConfidence = !res.confident;
     app.uncertain = new Set(res.uncertain);
+    app.givens = new Set();
     drawImage();
   }
 
@@ -309,7 +313,7 @@
     app.colors = Array.from({ length: app.N }, () => new Array(app.N).fill(0));
     app.palette = defaultPalette(app.N);
     app.lowConfidence = false;
-    app.uncertain = new Set();
+    app.uncertain = new Set(); app.givens = new Set();
     showEdit();
   };
 
@@ -319,7 +323,7 @@
     if (!colors) { alert('產生題目失敗，再試一次'); return; }
     app.img = null;
     $('imgWrap').classList.add('hidden');
-    app.N = n; app.colors = colors; app.palette = defaultPalette(n); app.lowConfidence = false; app.uncertain = new Set();
+    app.N = n; app.colors = colors; app.palette = defaultPalette(n); app.lowConfidence = false; app.uncertain = new Set(); app.givens = new Set();
     showEdit();
   };
 
@@ -335,7 +339,7 @@
         const v = old[r]?.[c]; return v !== undefined && v < n ? v : 0;
       }));
       app.palette = defaultPalette(n);
-      app.uncertain = new Set();
+      app.uncertain = new Set(); app.givens = new Set();
     }
     showEdit(false);
   };
@@ -359,23 +363,31 @@
   function renderPalette() {
     const el = $('palette');
     el.innerHTML = '';
-    app.palette.forEach((p, k) => {
+    const add = (k, html) => {
       const b = document.createElement('div');
-      b.className = 'sw-btn' + (k === app.sel ? ' sel' : '');
-      b.innerHTML = `<i style="background:${p.css}"></i>${p.name}`;
+      b.className = 'sw-btn' + (k === app.sel ? ' sel' : '') + (k === CAT_TOOL ? ' cat-tool' : '');
+      b.innerHTML = html;
       b.onclick = () => { app.sel = k; renderPalette(); };
       el.appendChild(b);
-    });
+    };
+    app.palette.forEach((p, k) => add(k, `<i style="background:${p.css}"></i>${p.name}`));
+    add(CAT_TOOL, '<i class="cat-i">🐱</i>提示貓');
   }
 
-  // 塗色：用 pointer 事件，手指拖過多格也能連續塗
+  // 塗色：用 pointer 事件，手指拖過多格也能連續塗；「提示貓」工具則是點一下切換
   let painting = false;
   $('editBoard').addEventListener('pointerdown', (e) => {
     const cell = e.target.closest('.cell');
     if (!cell) return;
-    painting = true;
-    paint(+cell.dataset.i);
     e.preventDefault();
+    const i = +cell.dataset.i;
+    if (app.sel === CAT_TOOL) {
+      if (app.givens.has(i)) app.givens.delete(i); else app.givens.add(i);
+      renderEditBoard();
+      return;
+    }
+    painting = true;
+    paint(i);
   });
   window.addEventListener('pointermove', (e) => {
     if (!painting) return;
@@ -406,6 +418,13 @@
     if (err) msgs.push(err);
     if (app.lowConfidence) msgs.push('有些顏色很接近，辨識可能有誤，請對照截圖檢查一下。');
     if (app.uncertain.size) msgs.push(`有 ${app.uncertain.size} 格被貓或記號蓋住、看不太到底色（標「?」的格子），請確認顏色；點一下就會取消標記。`);
+    const g = [...app.givens], n = app.N;
+    const clash = g.some((a) => g.some((b) => {
+      if (a >= b) return false;
+      const ra = (a / n) | 0, ca = a % n, rb = (b / n) | 0, cb = b % n;
+      return ra === rb || ca === cb || app.colors[ra][ca] === app.colors[rb][cb] || (Math.abs(ra - rb) <= 1 && Math.abs(ca - cb) <= 1);
+    }));
+    if (clash) msgs.push('有兩隻提示貓互相衝突（同橫列、同直行、同顏色或相鄰），請檢查。');
     $('warn').textContent = msgs.join(' ');
   }
 
@@ -435,7 +454,9 @@
         if (r === n - 1 || col[r + 1][c] !== k) d.classList.add('bb');
         if (c === 0 || col[r][c - 1] !== k) d.classList.add('bl');
         if (c === n - 1 || col[r][c + 1] !== k) d.classList.add('br');
-        if (edit && app.uncertain.has(i)) {
+        if (edit && app.givens.has(i)) {
+          d.textContent = '🐱';
+        } else if (edit && app.uncertain.has(i)) {
           d.innerHTML = '<span class="unsure">?</span>';
         }
         if (state) {
@@ -461,6 +482,7 @@
     const res = S.solve(app.colors, {
       colorNames: app.palette.map((p) => p.name),
       colorCss: app.palette.map((p) => p.css),
+      givens: [...app.givens],
     });
     if (!res.steps.length) { alert(res.error); return; }
     app.result = res;

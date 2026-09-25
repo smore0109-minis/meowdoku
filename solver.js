@@ -375,18 +375,46 @@
     const st = new Int8Array(B.size);
     const steps = [];
 
+    // 題目一開始就給的貓（有些版本用它讓答案唯一）
+    const givens = Array.from(new Set(opts.givens || [])).sort((a, b) => a - b);
+    for (const a of givens) {
+      for (const b of givens) {
+        if (a < b && B.conflict[a][b]) {
+          return { ok: false, error: `提示貓 ${F.plainCell(a)} 和 ${F.plainCell(b)} 互相衝突（同橫列、同直行、同顏色或相鄰），請檢查。`, steps };
+        }
+      }
+    }
+    const start = st.slice();
+    for (const g of givens) placeCat(B, st, g);
+
     const sols = search(B, st, 2);
     if (sols.length === 0) {
-      return { ok: false, error: '這個盤面無解，可能是顏色辨識錯誤，請檢查並修正格子顏色。', steps };
+      return {
+        ok: false, steps,
+        error: '這個盤面無解，可能是顏色辨識錯誤' + (givens.length ? '或提示貓標錯位置' : '') + '，請檢查並修正。',
+      };
     }
     const unique = sols.length === 1;
 
     steps.push({
       kind: 'start', title: '初始盤面',
       html: `${B.N}×${B.N} 的盤面，共 ${B.N} 種顏色，要找出 ${B.N} 隻貓。` +
-        (unique ? '' : '<br>⚠️ 注意：這個盤面有不只一組解，可能是顏色辨識有誤，最後可能需要用猜的。'),
-      state: st.slice(), prev: st.slice(),
+        (unique ? '' : '<br>⚠️ 注意：這個盤面有不只一組解。如果遊戲一開始有給貓的位置，請回到上一步用「🐱 提示貓」標出來；' +
+          '否則可能是顏色辨識有誤，最後可能需要用猜的。'),
+      state: start.slice(), prev: start.slice(),
     });
+
+    if (givens.length) {
+      let elim = 0;
+      for (let i = 0; i < B.size; i++) if (st[i] === X) elim++;
+      steps.push({
+        kind: 'given', title: '題目提示',
+        html: `題目一開始就給了 ${F.cells(givens)} 的貓 🐱。` +
+          (elim ? `<br>和${givens.length > 1 ? '它們' : '它'}同橫列、同直行、同顏色或相鄰（九宮格）的 ${elim} 個格子都不可能再有貓，全部排除。` : ''),
+        place: givens, focus: givens.slice(),
+        prev: start.slice(), state: st.slice(),
+      });
+    }
 
     for (let guard = 0; guard < 4 * B.size && countCats(st) < B.N; guard++) {
       const step =
