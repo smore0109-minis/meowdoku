@@ -61,6 +61,7 @@
   .board .cell.focus::before { content: ""; position: absolute; inset: 3px; border: 2px dashed var(--focus); border-radius: 4px; }
   .board .cell.hl { outline: 3px solid var(--focus); outline-offset: -3px; z-index: 1; }
   .board.edit .cell { cursor: pointer; }
+  .board .cell .unsure { font-size: .6em; font-weight: 800; color: #fff; background: #d93025; border-radius: 50%; width: 1.4em; height: 1.4em; display: flex; align-items: center; justify-content: center; }
   .board.edit .cell:hover { filter: brightness(.9); }
   @keyframes pop { 0% { transform: scale(.6); } 60% { transform: scale(1.15); } 100% { transform: scale(1); } }
 
@@ -194,6 +195,7 @@
     colors: null,
     palette: [],      // [{css, name}]
     sel: 0,
+    uncertain: new Set(), // 辨識不確定的格子
     result: null,
     idx: 0,
   };
@@ -242,6 +244,7 @@
     app.colors = res.colors;
     app.palette = res.palette.map((p) => ({ css: p.css, name: p.name }));
     app.lowConfidence = !res.confident;
+    app.uncertain = new Set(res.uncertain);
     drawImage();
   }
 
@@ -306,6 +309,7 @@
     app.colors = Array.from({ length: app.N }, () => new Array(app.N).fill(0));
     app.palette = defaultPalette(app.N);
     app.lowConfidence = false;
+    app.uncertain = new Set();
     showEdit();
   };
 
@@ -315,7 +319,7 @@
     if (!colors) { alert('產生題目失敗，再試一次'); return; }
     app.img = null;
     $('imgWrap').classList.add('hidden');
-    app.N = n; app.colors = colors; app.palette = defaultPalette(n); app.lowConfidence = false;
+    app.N = n; app.colors = colors; app.palette = defaultPalette(n); app.lowConfidence = false; app.uncertain = new Set();
     showEdit();
   };
 
@@ -331,6 +335,7 @@
         const v = old[r]?.[c]; return v !== undefined && v < n ? v : 0;
       }));
       app.palette = defaultPalette(n);
+      app.uncertain = new Set();
     }
     showEdit(false);
   };
@@ -389,8 +394,9 @@
 
   function paint(i) {
     const r = (i / app.N) | 0, c = i % app.N;
-    if (app.colors[r][c] === app.sel) return;
+    if (app.colors[r][c] === app.sel && !app.uncertain.has(i)) return;
     app.colors[r][c] = app.sel;
+    app.uncertain.delete(i); // 使用者點過就當作已確認
     renderEditBoard();
   }
 
@@ -399,6 +405,7 @@
     const err = S.validateColors(app.colors);
     if (err) msgs.push(err);
     if (app.lowConfidence) msgs.push('有些顏色很接近，辨識可能有誤，請對照截圖檢查一下。');
+    if (app.uncertain.size) msgs.push(`有 ${app.uncertain.size} 格被貓或記號蓋住、看不太到底色（標「?」的格子），請確認顏色；點一下就會取消標記。`);
     $('warn').textContent = msgs.join(' ');
   }
 
@@ -428,6 +435,9 @@
         if (r === n - 1 || col[r + 1][c] !== k) d.classList.add('bb');
         if (c === 0 || col[r][c - 1] !== k) d.classList.add('bl');
         if (c === n - 1 || col[r][c + 1] !== k) d.classList.add('br');
+        if (edit && app.uncertain.has(i)) {
+          d.innerHTML = '<span class="unsure">?</span>';
+        }
         if (state) {
           if (state[i] === S.CAT) {
             d.textContent = '🐱';

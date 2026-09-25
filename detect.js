@@ -162,26 +162,62 @@
 
   const dist2 = (a, b) => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2;
 
+  // 格子中央可能已經有貓或 ×（做到一半的題目），所以只取靠近格子邊緣的 8 小塊
+  //（四個角 + 四邊中點），再取「最多像素接近」的顏色當作底色，讓少數的標記像素被投票淘汰。
+  const PATCHES = [];
+  for (const fy of [0.14, 0.5, 0.86]) for (const fx of [0.14, 0.5, 0.86]) if (fx !== 0.5 || fy !== 0.5) PATCHES.push([fx, fy]);
+  const PATCH_HALF = 0.055;
+
+  // 回傳每格的 { main: 整體主色, patches: 8 小塊各自的主色 }
   function sampleCells(img, box, n) {
     const { width: W, data } = img;
     const out = [];
     const cw = box.w / n, ch = box.h / n;
     for (let r = 0; r < n; r++) {
       for (let c = 0; c < n; c++) {
-        const x0 = Math.round(box.x + (c + 0.28) * cw), x1 = Math.round(box.x + (c + 0.72) * cw);
-        const y0 = Math.round(box.y + (r + 0.28) * ch), y1 = Math.round(box.y + (r + 0.72) * ch);
-        const R = [], G = [], B = [];
-        for (let y = y0; y <= y1; y++) {
-          for (let x = x0; x <= x1; x++) {
-            const p = (y * W + x) * 4;
-            R.push(data[p]); G.push(data[p + 1]); B.push(data[p + 2]);
+        const all = [], patches = [];
+        for (const [fx, fy] of PATCHES) {
+          const x0 = Math.round(box.x + (c + fx - PATCH_HALF) * cw), x1 = Math.round(box.x + (c + fx + PATCH_HALF) * cw);
+          const y0 = Math.round(box.y + (r + fy - PATCH_HALF) * ch), y1 = Math.round(box.y + (r + fy + PATCH_HALF) * ch);
+          const px = [];
+          for (let y = y0; y <= y1; y++) {
+            for (let x = x0; x <= x1; x++) {
+              const p = (y * W + x) * 4;
+              px.push([data[p], data[p + 1], data[p + 2]]);
+            }
           }
+          patches.push(dominantColor(px));
+          for (const q of px) all.push(q);
         }
-        const med = (a) => { a.sort((u, v) => u - v); return a[a.length >> 1] || 0; };
-        out.push([med(R), med(G), med(B)]);
+        out.push({ main: dominantColor(all), patches });
       }
     }
     return out;
+  }
+
+  // 遊戲裡的 × 是白色的：先忽略接近純白的像素；如果整塊幾乎都是白色，才當作底色真的是白的
+  const nearWhite = (q) => Math.min(q[0], q[1], q[2]) > 225 && Math.max(q[0], q[1], q[2]) - Math.min(q[0], q[1], q[2]) < 20;
+
+  // 找出「附近最多像素」的顏色，再把接近它的像素平均
+  function dominantColor(px) {
+    if (!px.length) return [0, 0, 0];
+    const colored = px.filter((q) => !nearWhite(q));
+    if (colored.length >= px.length * 0.2) px = colored;
+    const R2 = 22 * 22;
+    const step = Math.max(1, Math.floor(px.length / 180));
+    const seeds = px.filter((_, i) => i % step === 0);
+    let best = seeds[0], bestN = -1;
+    for (const s of seeds) {
+      let cnt = 0;
+      for (const q of seeds) if (dist2(s, q) < R2) cnt++;
+      if (cnt > bestN) { bestN = cnt; best = s; }
+    }
+    const sum = [0, 0, 0];
+    let m = 0;
+    for (const q of px) {
+      if (dist2(best, q) < R2) { sum[0] += q[0]; sum[1] += q[1]; sum[2] += q[2]; m++; }
+    }
+    return sum.map((v) => v / m);
   }
 
   // 聚合式分群，直到剩下 k 群
@@ -250,11 +286,66 @@
   const toCss = ([r, g, b]) => `rgb(${r | 0},${g | 0},${b | 0})`;
 
   function readColors(img, box, n) {
-    const rgbs = sampleCells(img, box, n);
+    const samples = sampleCells(img, box, n);
+    let rgbs = samples.map((s) => s.main);
     const labs = rgbs.map(rgb2lab);
-    const groups = cluster(labs, n);
+    const patchLabs = samples.map((s) => s.patches.map(rgb2lab));
+
+    // 第一輪：用每格的整體主色分成 n 群
+    const label = new Array(n * n);
+    cluster(labs, n).forEach((g, k) => g.members.forEach((i) => (label[i] = k)));
+
+    // 第二輪：每格的 8 小塊各自投票給「明顯吻合」的群，貓 / × 的顏色不吻合任何群就不算票
+    const MATCH2 = 14 * 14;
+    for (let iter = 0; iter < 3; iter++) {
+      const cen = [];
+      for (let k = 0; k < n; k++) {
+        const mem = [];
+        label.forEach((l, i) => l === k && mem.push(i));
+        cen.push(mem.length ? [0, 1, 2].map((t) => mem.reduce((s, i) => s + labs[i][t], 0) / mem.length) : null);
+      }
+      let changed = false;
+      const nextRgb = [];
+      for (let i = 0; i < n * n; i++) {
+        const votes = new Array(n).fill(0);
+        for (const pl of patchLabs[i]) {
+          let bk = -1, bd = Infinity;
+          cen.forEach((c, k) => { if (c) { const d = dist2(pl, c); if (d < bd) { bd = d; bk = k; } } });
+          if (bk >= 0 && bd < MATCH2) votes[bk]++;
+        }
+        const best = votes.indexOf(Math.max(...votes));
+        if (votes[best] >= 2 && best !== label[i] && votes[best] > votes[label[i]]) { label[i] = best; changed = true; }
+        // 這格的代表色改用投給它所屬群的那些小塊平均，避免被標記拉偏
+        const good = samples[i].patches.filter((_, p) => cen[label[i]] && dist2(patchLabs[i][p], cen[label[i]]) < MATCH2);
+        nextRgb.push(good.length ? [0, 1, 2].map((t) => good.reduce((s, q) => s + q[t], 0) / good.length) : rgbs[i]);
+      }
+      rgbs = nextRgb;
+      rgbs.forEach((c, i) => (labs[i] = rgb2lab(c)));
+      if (!changed) break;
+    }
+
+    // 看得到底色的小塊太少（例如貓圖幾乎蓋滿整格）→ 標記為不確定，請使用者確認
+    const finalCen = [];
+    for (let k = 0; k < n; k++) {
+      const mem = [];
+      label.forEach((l, i) => l === k && mem.push(i));
+      finalCen.push(mem.length ? [0, 1, 2].map((t) => mem.reduce((s, i) => s + labs[i][t], 0) / mem.length) : null);
+    }
+    const uncertainIdx = [];
+    for (let i = 0; i < n * n; i++) {
+      const c = finalCen[label[i]];
+      const ok = patchLabs[i].filter((pl) => c && dist2(pl, c) < MATCH2).length;
+      if (ok < 3) uncertainIdx.push(i);
+    }
+
     // 依照第一次出現的位置排序，讓編號穩定（左上 → 右下）
-    groups.sort((a, b) => Math.min(...a.members) - Math.min(...b.members));
+    const groups = [];
+    for (let k = 0; k < n; k++) {
+      const members = [];
+      label.forEach((l, i) => l === k && members.push(i));
+      if (members.length) groups.push({ members });
+    }
+    groups.sort((a, b) => a.members[0] - b.members[0]);
     const colors = Array.from({ length: n }, () => new Array(n).fill(0));
     const palette = groups.map((g, k) => {
       const avg = [0, 1, 2].map((t) => g.members.reduce((s, i) => s + rgbs[i][t], 0) / g.members.length);
@@ -267,9 +358,10 @@
     // 可信度：群內最大差異 vs 群間最小差異
     let intra = 0, inter = Infinity;
     const cLab = palette.map((p) => rgb2lab(p.rgb));
-    labs.forEach((l, i) => { intra = Math.max(intra, Math.sqrt(dist2(l, cLab[colors[(i / n) | 0][i % n]]))); });
+    const unsure = new Set(uncertainIdx);
+    labs.forEach((l, i) => { if (!unsure.has(i)) intra = Math.max(intra, Math.sqrt(dist2(l, cLab[colors[(i / n) | 0][i % n]]))); });
     for (let a = 0; a < n; a++) for (let b = a + 1; b < n; b++) inter = Math.min(inter, Math.sqrt(dist2(cLab[a], cLab[b])));
-    return { colors, palette, confident: inter > 2.5 * intra && inter > 8, intra, inter };
+    return { colors, palette, uncertain: uncertainIdx, confident: inter > 2.5 * intra && inter > 8, intra, inter };
   }
 
   global.MeowDetect = { detectBoard, detectN, readColors, nameColors, toCss };

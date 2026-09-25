@@ -1,5 +1,5 @@
 // MeowDoku service worker：離線可用 + Android 分享截圖
-const CACHE = 'meowdoku-v1';
+const CACHE = 'meowdoku-v2';
 const FILES = [
   './', './index.html', './solver.js', './detect.js', './manifest.webmanifest',
   './icon-192.png', './icon-512.png', './apple-touch-icon.png',
@@ -38,7 +38,7 @@ self.addEventListener('fetch', (e) => {
 
   // 有網路時抓最新版，沒網路時用快取
   e.respondWith(
-    fetch(e.request)
+    fetch(e.request, { cache: 'no-cache' })
       .then((res) => {
         const copy = res.clone();
         caches.open(CACHE).then((c) => c.put(e.request, copy));
