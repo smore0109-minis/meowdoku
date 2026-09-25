@@ -1,0 +1,23 @@
+{
+  "name": "MeowDoku 解題小幫手",
+  "short_name": "MeowDoku",
+  "description": "上傳 MeowDoku 截圖，一步一步解題",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#faf7f2",
+  "theme_color": "#e8833a",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "share_target": {
+    "action": "./share",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "files": [{ "name": "image", "accept": ["image/*"] }]
+    }
+  }
+}

@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#e8833a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="MeowDoku">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<title>MeowDoku 解題小幫手 🐱</title>
+<style>
+  :root {
+    --bg: #faf7f2; --card: #fff; --ink: #2d2a26; --muted: #8a8278; --line: #e7e1d8;
+    --accent: #e8833a; --accent-soft: #fdebdc; --focus: #2f7de1; --bad: #d93025;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, "Microsoft JhengHei", "PingFang TC", sans-serif; background: var(--bg); color: var(--ink); }
+  header { padding: 20px 24px 8px; }
+  header h1 { margin: 0; font-size: 24px; }
+  header p { margin: 6px 0 0; color: var(--muted); font-size: 14px; }
+  main { padding: 12px 24px 40px; display: flex; flex-direction: column; gap: 18px; max-width: 1200px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .card h2 { margin: 0 0 12px; font-size: 17px; }
+  .hidden { display: none !important; }
+  .row { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
+  .muted { color: var(--muted); font-size: 13px; }
+  button, select, input[type=number] {
+    font: inherit; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--line); background: #fff; cursor: pointer;
+  }
+  input[type=number] { width: 64px; cursor: text; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; }
+  button.primary:hover { filter: brightness(1.05); }
+  button:disabled { opacity: .4; cursor: default; }
+
+  #drop { border: 2px dashed #d8cfc2; border-radius: 12px; padding: 28px; text-align: center; cursor: pointer; transition: .15s; }
+  #drop.over, #drop:hover { border-color: var(--accent); background: var(--accent-soft); }
+  #drop b { font-size: 16px; }
+  .tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+
+  #imgWrap { position: relative; max-width: 460px; flex: 1 1 320px; }
+  #imgCanvas { max-width: 100%; max-height: 560px; width: auto; height: auto; border-radius: 8px; border: 1px solid var(--line); cursor: crosshair; display: block; touch-action: none; }
+  .board.edit { touch-action: none; }
+
+  /* 盤面 */
+  .board { display: inline-grid; user-select: none; }
+  .board .hd { color: var(--muted); font-size: 12px; display: flex; align-items: center; justify-content: center; }
+  .board .cell {
+    position: relative; display: flex; align-items: center; justify-content: center;
+    border: 1px solid rgba(0,0,0,.18); line-height: 1;
+  }
+  .board .cell.bt { border-top: 3px solid #333; } .board .cell.bb { border-bottom: 3px solid #333; }
+  .board .cell.bl { border-left: 3px solid #333; } .board .cell.br { border-right: 3px solid #333; }
+  .board .cell .x { color: rgba(0,0,0,.35); font-weight: 700; }
+  .board .cell.new-x .x { color: var(--bad); }
+  .board .cell.new-x::after { content: ""; position: absolute; inset: 2px; border-radius: 4px; background: rgba(217,48,37,.12); }
+  .board .cell.new-cat { animation: pop .5s; }
+  .board .cell.new-cat::after { content: ""; position: absolute; inset: 1px; border: 3px solid #1e8e3e; border-radius: 4px; }
+  .board .cell.focus::before { content: ""; position: absolute; inset: 3px; border: 2px dashed var(--focus); border-radius: 4px; }
+  .board .cell.hl { outline: 3px solid var(--focus); outline-offset: -3px; z-index: 1; }
+  .board.edit .cell { cursor: pointer; }
+  .board.edit .cell:hover { filter: brightness(.9); }
+  @keyframes pop { 0% { transform: scale(.6); } 60% { transform: scale(1.15); } 100% { transform: scale(1); } }
+
+  .palette { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+  .palette .sw-btn { display: flex; align-items: center; gap: 6px; padding: 4px 10px 4px 4px; border-radius: 20px; border: 2px solid transparent; background: #f4f1ec; cursor: pointer; font-size: 13px; }
+  .palette .sw-btn.sel { border-color: var(--ink); }
+  .palette .sw-btn i { width: 20px; height: 20px; border-radius: 50%; border: 1px solid rgba(0,0,0,.2); display: inline-block; }
+  .sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 1px solid rgba(0,0,0,.3); margin-right: 3px; vertical-align: -1px; }
+
+  #warn { color: #b3261e; font-size: 14px; margin: 8px 0; }
+  #warn:empty { display: none; }
+
+  /* 步驟 */
+  .solve-layout { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; }
+  .nav { display: flex; gap: 6px; align-items: center; margin-top: 12px; }
+  .nav .count { min-width: 80px; text-align: center; font-size: 14px; color: var(--muted); }
+  #stepBox { flex: 1 1 380px; min-width: 300px; }
+  #curStep { background: #fffaf4; border: 1px solid #f3dcc6; border-radius: 10px; padding: 14px 16px; line-height: 1.8; font-size: 15px; }
+  #curStep .tag { display: inline-block; background: var(--accent); color: #fff; border-radius: 6px; padding: 1px 8px; font-size: 13px; margin-right: 6px; }
+  #curStep ol { margin: 6px 0; padding-left: 22px; }
+  .ref { cursor: help; border-bottom: 1px dotted var(--focus); white-space: nowrap; }
+  #stepList { list-style: none; margin: 14px 0 0; padding: 0; max-height: 420px; overflow: auto; border-top: 1px solid var(--line); }
+  #stepList li { padding: 6px 8px; border-bottom: 1px solid var(--line); cursor: pointer; font-size: 13px; display: flex; gap: 8px; }
+  #stepList li:hover { background: #f7f3ee; }
+  #stepList li.cur { background: var(--accent-soft); font-weight: 600; }
+  #stepList li .n { color: var(--muted); width: 26px; text-align: right; flex: none; }
+  .legend { font-size: 12px; color: var(--muted); margin-top: 10px; line-height: 1.8; }
+  .legend span { margin-right: 12px; }
+
+  @media (max-width: 640px) {
+    header { padding: 14px 12px 4px; }
+    header h1 { font-size: 20px; }
+    main { padding: 8px 8px 32px; gap: 12px; }
+    .card { padding: 12px; }
+    #drop { padding: 22px 12px; }
+    #imgCanvas { max-height: 50vh; }
+    #stepBox { min-width: 0; flex-basis: 100%; }
+    #curStep { font-size: 14px; padding: 12px; }
+    .nav { justify-content: space-between; }
+    .nav button { padding: 8px 10px; }
+    .nav .count { min-width: 56px; }
+    #stepList { max-height: 300px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>🐱 MeowDoku 解題小幫手</h1>
+  <p>規則：① 貓的周圍八格沒有其他貓 ② 每種顏色恰好一隻貓 ③ 每個橫列、直行恰好一隻貓</p>
+</header>
+
+<main>
+  <section class="card">
+    <h2>① 上傳題目截圖</h2>
+    <div id="drop">
+      <b>點這裡選擇截圖</b>
+      <div class="muted" style="margin-top:6px">手機可直接從相簿挑；電腦也可以把圖片拖進來或 Ctrl+V 貼上<br>會自動找出盤面、判斷格數與顏色</div>
+      <input type="file" id="file" accept="image/*" hidden>
+    </div>
+    <div class="tools">
+      <span class="muted">沒有圖片？</span>
+      <button id="btnBlank">手動塗色建立盤面</button>
+      <button id="btnSample">隨機範例題目</button>
+      <select id="sampleN">
+        <option>5</option><option>6</option><option selected>7</option><option>8</option>
+      </select>
+    </div>
+  </section>
+
+  <section class="card hidden" id="cardEdit">
+    <h2>② 確認盤面（辨識錯誤可以在右邊直接修正）</h2>
+    <div class="row">
+      <div id="imgWrap" class="hidden">
+        <canvas id="imgCanvas"></canvas>
+        <div class="muted" style="margin-top:6px">紅框是偵測到的盤面。框錯的話，直接在圖上用手指或滑鼠<b>拖曳</b>重新框選。</div>
+      </div>
+      <div>
+        <div class="tools" style="margin-top:0">
+          格數 N = <input type="number" id="nInput" min="3" max="16">
+          <button id="btnAutoN">自動偵測格數</button>
+        </div>
+        <div class="palette" id="palette"></div>
+        <div class="muted" style="margin-bottom:8px">先點上面的顏色，再點（或拖過）盤面格子即可改色。</div>
+        <div id="editBoard"></div>
+        <div id="warn"></div>
+        <div class="tools"><button class="primary" id="btnSolve">開始解題 🐾</button></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card hidden" id="cardSolve">
+    <h2>③ 一步一步解題</h2>
+    <div class="solve-layout">
+      <div>
+        <div id="solveBoard"></div>
+        <div class="nav">
+          <button id="first" title="第一步">⏮</button>
+          <button id="prev" title="上一步 (←)">◀ 上一步</button>
+          <span class="count" id="count"></span>
+          <button id="next" title="下一步 (→)">下一步 ▶</button>
+          <button id="last" title="直接看答案">⏭</button>
+        </div>
+        <div class="legend">
+          <span>🐱 貓</span><span><b style="color:#1e8e3e">綠框</b> 這一步放的貓</span>
+          <span><b style="color:var(--bad)">紅 ×</b> 這一步排除的格子</span>
+          <span><b style="color:var(--focus)">藍虛線</b> 推理依據</span><br>
+          <span>R3C5 = 第 3 橫列、第 5 直行（點一下或把滑鼠移到文字上，會在盤面標示位置）</span>
+        </div>
+      </div>
+      <div id="stepBox">
+        <div id="curStep"></div>
+        <ul id="stepList"></ul>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script src="solver.js"></script>
+<script src="detect.js"></script>
+<script>
+(() => {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const S = window.MeowSolver, D = window.MeowDetect;
+
+  const app = {
+    img: null,        // ImageData
+    imgCanvas: null,  // 原圖 canvas
+    box: null,
+    N: 0,
+    colors: null,
+    palette: [],      // [{css, name}]
+    sel: 0,
+    result: null,
+    idx: 0,
+  };
+
+  // ------------------------------------------------------------ 圖片輸入
+  const drop = $('drop'), fileInput = $('file');
+  drop.onclick = () => fileInput.click();
+  fileInput.onchange = () => fileInput.files[0] && loadFile(fileInput.files[0]);
+  drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('over'); };
+  drop.ondragleave = () => drop.classList.remove('over');
+  drop.ondrop = (e) => {
+    e.preventDefault(); drop.classList.remove('over');
+    const f = [...e.dataTransfer.files].find((f) => f.type.startsWith('image/'));
+    if (f) loadFile(f);
+  };
+  window.addEventListener('paste', (e) => {
+    const item = [...(e.clipboardData?.items || [])].find((i) => i.type.startsWith('image/'));
+    if (item) loadFile(item.getAsFile());
+  });
+
+  function loadFile(file) {
+    const url = URL.createObjectURL(file);
+    const im = new Image();
+    im.onload = () => { loadImage(im); URL.revokeObjectURL(url); };
+    im.src = url;
+  }
+
+  function loadImage(im) {
+    const scale = Math.min(1, 1600 / Math.max(im.naturalWidth, im.naturalHeight));
+    const cv = document.createElement('canvas');
+    cv.width = Math.round(im.naturalWidth * scale);
+    cv.height = Math.round(im.naturalHeight * scale);
+    const ctx = cv.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(im, 0, 0, cv.width, cv.height);
+    app.imgCanvas = cv;
+    app.img = ctx.getImageData(0, 0, cv.width, cv.height);
+    app.box = D.detectBoard(app.img);
+    app.N = D.detectN(app.img, app.box).n;
+    readFromImage();
+    $('imgWrap').classList.remove('hidden');
+    showEdit();
+  }
+
+  function readFromImage() {
+    const res = D.readColors(app.img, app.box, app.N);
+    app.colors = res.colors;
+    app.palette = res.palette.map((p) => ({ css: p.css, name: p.name }));
+    app.lowConfidence = !res.confident;
+    drawImage();
+  }
+
+  function drawImage() {
+    const cv = $('imgCanvas');
+    cv.width = app.imgCanvas.width; cv.height = app.imgCanvas.height;
+    const ctx = cv.getContext('2d');
+    ctx.drawImage(app.imgCanvas, 0, 0);
+    const { x, y, w, h } = app.box, n = app.N;
+    const lw = Math.max(2, cv.width / 300);
+    ctx.strokeStyle = 'rgba(255,0,60,.9)'; ctx.lineWidth = lw * 1.5;
+    ctx.strokeRect(x, y, w, h);
+    ctx.strokeStyle = 'rgba(255,0,60,.55)'; ctx.lineWidth = lw * 0.6;
+    ctx.beginPath();
+    for (let i = 1; i < n; i++) {
+      ctx.moveTo(x + (w * i) / n, y); ctx.lineTo(x + (w * i) / n, y + h);
+      ctx.moveTo(x, y + (h * i) / n); ctx.lineTo(x + w, y + (h * i) / n);
+    }
+    ctx.stroke();
+  }
+
+  // 在圖上拖曳重新框選
+  (() => {
+    const cv = $('imgCanvas');
+    let start = null;
+    const pt = (e) => {
+      const r = cv.getBoundingClientRect();
+      return [(e.clientX - r.left) * (cv.width / r.width), (e.clientY - r.top) * (cv.height / r.height)];
+    };
+    cv.addEventListener('pointerdown', (e) => { start = pt(e); cv.setPointerCapture(e.pointerId); e.preventDefault(); });
+    cv.addEventListener('pointermove', (e) => {
+      if (!start) return;
+      const [x, y] = pt(e);
+      app.box = { x: Math.max(0, Math.min(start[0], x)), y: Math.max(0, Math.min(start[1], y)), w: Math.abs(x - start[0]), h: Math.abs(y - start[1]) };
+      app.box.w = Math.min(app.box.w, cv.width - app.box.x); app.box.h = Math.min(app.box.h, cv.height - app.box.y);
+      drawImage();
+    });
+    const finish = () => {
+      if (!start) return;
+      start = null;
+      if (app.box.w < 20 || app.box.h < 20) return;
+      app.N = D.detectN(app.img, app.box).n;
+      readFromImage();
+      showEdit(false);
+    };
+    cv.addEventListener('pointerup', finish);
+    cv.addEventListener('pointercancel', finish);
+  })();
+
+  // ------------------------------------------------------------ 手動 / 範例
+  function defaultPalette(n) {
+    const css = S.DEFAULT_CSS.slice(0, n);
+    const rgbs = css.map((c) => [1, 3, 5].map((p) => parseInt(c.substr(p, 2), 16)));
+    const names = D.nameColors(rgbs);
+    return css.map((c, k) => ({ css: c, name: names[k] }));
+  }
+
+  $('btnBlank').onclick = () => {
+    app.img = null;
+    $('imgWrap').classList.add('hidden');
+    app.N = app.N || 7;
+    app.colors = Array.from({ length: app.N }, () => new Array(app.N).fill(0));
+    app.palette = defaultPalette(app.N);
+    app.lowConfidence = false;
+    showEdit();
+  };
+
+  $('btnSample').onclick = () => {
+    const n = +$('sampleN').value;
+    const colors = S.generate(n, (Math.random() * 1e9) | 0);
+    if (!colors) { alert('產生題目失敗，再試一次'); return; }
+    app.img = null;
+    $('imgWrap').classList.add('hidden');
+    app.N = n; app.colors = colors; app.palette = defaultPalette(n); app.lowConfidence = false;
+    showEdit();
+  };
+
+  // ------------------------------------------------------------ 盤面編輯
+  $('nInput').onchange = () => {
+    const n = Math.max(3, Math.min(16, +$('nInput').value | 0));
+    if (n === app.N) return;
+    app.N = n;
+    if (app.img) readFromImage();
+    else {
+      const old = app.colors;
+      app.colors = Array.from({ length: n }, (_, r) => Array.from({ length: n }, (_, c) => {
+        const v = old[r]?.[c]; return v !== undefined && v < n ? v : 0;
+      }));
+      app.palette = defaultPalette(n);
+    }
+    showEdit(false);
+  };
+  $('btnAutoN').onclick = () => {
+    if (!app.img) { alert('要先上傳圖片才能自動偵測'); return; }
+    app.N = D.detectN(app.img, app.box).n;
+    readFromImage();
+    showEdit(false);
+  };
+
+  function showEdit(scroll = true) {
+    $('cardEdit').classList.remove('hidden');
+    $('cardSolve').classList.add('hidden');
+    $('nInput').value = app.N;
+    app.sel = Math.min(app.sel, app.N - 1);
+    renderPalette();
+    renderEditBoard();
+    if (scroll) $('cardEdit').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function renderPalette() {
+    const el = $('palette');
+    el.innerHTML = '';
+    app.palette.forEach((p, k) => {
+      const b = document.createElement('div');
+      b.className = 'sw-btn' + (k === app.sel ? ' sel' : '');
+      b.innerHTML = `<i style="background:${p.css}"></i>${p.name}`;
+      b.onclick = () => { app.sel = k; renderPalette(); };
+      el.appendChild(b);
+    });
+  }
+
+  // 塗色：用 pointer 事件，手指拖過多格也能連續塗
+  let painting = false;
+  $('editBoard').addEventListener('pointerdown', (e) => {
+    const cell = e.target.closest('.cell');
+    if (!cell) return;
+    painting = true;
+    paint(+cell.dataset.i);
+    e.preventDefault();
+  });
+  window.addEventListener('pointermove', (e) => {
+    if (!painting) return;
+    const cell = document.elementFromPoint(e.clientX, e.clientY)?.closest('#editBoard .cell');
+    if (cell) paint(+cell.dataset.i);
+  });
+  window.addEventListener('pointerup', () => (painting = false));
+  window.addEventListener('pointercancel', () => (painting = false));
+
+  function renderEditBoard() {
+    const el = $('editBoard');
+    el.innerHTML = '';
+    el.appendChild(makeBoard({ edit: true }));
+    updateWarn();
+  }
+
+  function paint(i) {
+    const r = (i / app.N) | 0, c = i % app.N;
+    if (app.colors[r][c] === app.sel) return;
+    app.colors[r][c] = app.sel;
+    renderEditBoard();
+  }
+
+  function updateWarn() {
+    const msgs = [];
+    const err = S.validateColors(app.colors);
+    if (err) msgs.push(err);
+    if (app.lowConfidence) msgs.push('有些顏色很接近，辨識可能有誤，請對照截圖檢查一下。');
+    $('warn').textContent = msgs.join(' ');
+  }
+
+  // ------------------------------------------------------------ 盤面繪製
+  function makeBoard({ edit = false, state = null, prev = null, focus = [] } = {}) {
+    const n = app.N;
+    const avail = Math.min(460, document.documentElement.clientWidth - 60);
+    const size = Math.max(22, Math.min(54, Math.floor(avail / n)));
+    const g = document.createElement('div');
+    g.className = 'board' + (edit ? ' edit' : '');
+    g.style.gridTemplateColumns = `18px repeat(${n}, ${size}px)`;
+    g.style.gridTemplateRows = `18px repeat(${n}, ${size}px)`;
+    g.appendChild(document.createElement('div'));
+    for (let c = 0; c < n; c++) { const h = document.createElement('div'); h.className = 'hd'; h.textContent = c + 1; g.appendChild(h); }
+    const fset = new Set(focus);
+    const col = app.colors;
+    for (let r = 0; r < n; r++) {
+      const h = document.createElement('div'); h.className = 'hd'; h.textContent = r + 1; g.appendChild(h);
+      for (let c = 0; c < n; c++) {
+        const i = r * n + c, k = col[r][c];
+        const d = document.createElement('div');
+        d.className = 'cell';
+        d.dataset.i = i;
+        d.style.background = app.palette[k]?.css || '#ccc';
+        d.style.fontSize = Math.round(size * 0.6) + 'px';
+        if (r === 0 || col[r - 1][c] !== k) d.classList.add('bt');
+        if (r === n - 1 || col[r + 1][c] !== k) d.classList.add('bb');
+        if (c === 0 || col[r][c - 1] !== k) d.classList.add('bl');
+        if (c === n - 1 || col[r][c + 1] !== k) d.classList.add('br');
+        if (state) {
+          if (state[i] === S.CAT) {
+            d.textContent = '🐱';
+            if (prev && prev[i] !== S.CAT) d.classList.add('new-cat');
+          } else if (state[i] === S.X) {
+            d.innerHTML = '<span class="x">×</span>';
+            if (prev && prev[i] === S.CAND) d.classList.add('new-x');
+          }
+          if (fset.has(i)) d.classList.add('focus');
+        }
+        g.appendChild(d);
+      }
+    }
+    return g;
+  }
+
+  // ------------------------------------------------------------ 解題
+  $('btnSolve').onclick = () => {
+    const err = S.validateColors(app.colors);
+    if (err) { alert(err); return; }
+    const res = S.solve(app.colors, {
+      colorNames: app.palette.map((p) => p.name),
+      colorCss: app.palette.map((p) => p.css),
+    });
+    if (!res.steps.length) { alert(res.error); return; }
+    app.result = res;
+    app.idx = 0;
+    $('cardSolve').classList.remove('hidden');
+    renderStepList();
+    showStep(0);
+    $('cardSolve').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  function renderStepList() {
+    const ul = $('stepList');
+    ul.innerHTML = '';
+    app.result.steps.forEach((s, k) => {
+      const li = document.createElement('li');
+      const brief = s.html.replace(/<br>.*$/s, '').replace(/<[^>]+>/g, '').slice(0, 60);
+      li.innerHTML = `<span class="n">${k}</span><span><b>${s.title}</b>　${brief}</span>`;
+      li.onclick = () => showStep(k);
+      ul.appendChild(li);
+    });
+  }
+
+  function showStep(k) {
+    const steps = app.result.steps;
+    k = Math.max(0, Math.min(steps.length - 1, k));
+    app.idx = k;
+    const s = steps[k];
+    const box = $('solveBoard');
+    box.innerHTML = '';
+    box.appendChild(makeBoard({ state: s.state, prev: s.prev, focus: s.focus || [] }));
+    $('curStep').innerHTML = `<span class="tag">${k === 0 ? '開始' : '步驟 ' + k}</span><b>${s.title}</b><br>${s.html}`;
+    $('count').textContent = `${k} / ${steps.length - 1}`;
+    $('first').disabled = $('prev').disabled = k === 0;
+    $('next').disabled = $('last').disabled = k === steps.length - 1;
+    [...$('stepList').children].forEach((li, j) => li.classList.toggle('cur', j === k));
+    $('stepList').children[k]?.scrollIntoView({ block: 'nearest' });
+  }
+
+  $('first').onclick = () => showStep(0);
+  $('prev').onclick = () => showStep(app.idx - 1);
+  $('next').onclick = () => showStep(app.idx + 1);
+  $('last').onclick = () => showStep(app.result.steps.length - 1);
+  window.addEventListener('keydown', (e) => {
+    if (!app.result || $('cardSolve').classList.contains('hidden') || e.target.tagName === 'INPUT') return;
+    if (e.key === 'ArrowRight') showStep(app.idx + 1);
+    if (e.key === 'ArrowLeft') showStep(app.idx - 1);
+  });
+
+  // 滑鼠移到（或手指點）說明文字上的格子 / 區域 → 在盤面上標示
+  const highlight = (ref) => {
+    const ids = ref ? new Set(ref.dataset.cells.split(',').map(Number)) : new Set();
+    document.querySelectorAll('#solveBoard .cell').forEach((c) => c.classList.toggle('hl', ids.has(+c.dataset.i)));
+  };
+  $('curStep').addEventListener('mouseover', (e) => { const ref = e.target.closest('.ref'); if (ref) highlight(ref); });
+  $('curStep').addEventListener('mouseout', (e) => { if (e.target.closest('.ref')) highlight(null); });
+  $('curStep').addEventListener('click', (e) => highlight(e.target.closest('.ref')));
+
+  // ------------------------------------------------------------ 手機 App（PWA）
+  // Android：從相簿「分享」截圖到 MeowDoku 時，service worker 會先把圖存起來再導回這頁
+  if (new URLSearchParams(location.search).has('shared') && 'caches' in window) {
+    caches.open('meowdoku-share').then(async (cache) => {
+      const res = await cache.match('shared-image');
+      if (!res) return;
+      await cache.delete('shared-image');
+      loadFile(await res.blob());
+      history.replaceState(null, '', location.pathname);
+    });
+  }
+  if ('serviceWorker' in navigator && window.isSecureContext) {
+    navigator.serviceWorker.register('sw.js');
+  }
+})();
+</script>
+</body>
+</html>
